@@ -185,11 +185,10 @@ def _parse_vht(packet, offset):
     vht_per_user =  {}
     for (i, vht_user) in enumerate([vht_user_0, vht_user_1, vht_user_2, vht_user_3]):
         if vht_user:
-            vht_per_user[i] = {}
-            vht_nss_n =  vht_user & 0xf0 >> 4
-            vht_mcs_index_n = (vht_user & 0xf0)  >> 4
-            vht_per_user[i]['vht_coding'] = (vht_coding & 2**i) >> i
-            if not(vht_gi is None) and not(vht_bandwidth is None):
+            vht_per_user[i] = {'vht_coding': (vht_coding & 2**i) >> i}
+            if vht_gi is not None and vht_bandwidth is not None:
+                vht_nss_n =  vht_user & 0xf0 >> 4
+                vht_mcs_index_n = (vht_user & 0xf0)  >> 4
                 vht_per_user[i].update(vht_rate_description(vht_mcs_index_n,vht_nss_n,vht_gi,vht_bandwidth))
 
     return offset + 12, {
@@ -256,23 +255,19 @@ def _present_bits(bitmap):
     namespace = 'radiotap'
     while offset < len(bitmap):
         present, = struct.unpack_from("<I", bitmap[offset:])
-        for i in range(0, 32):
+        for i in range(32):
             # reserved bits:
             #  29 = radiotap namespace
             #  30 = vendor namespace
             #  31 = extended bitmap
             if present & (1 << i):
                 if i == 29:
-                    namespace = 'radiotap'
                     reset_count = True
-                    yield namespace, None
+                    yield ('radiotap', None)
                 elif i == 30:
-                    namespace = 'vendor'
                     reset_count = True
-                    yield namespace, None
-                elif i == 31:
-                    pass
-                else:
+                    yield ('vendor', None)
+                elif i != 31:
                     yield namespace, count + i
         if reset_count:
             count = 0
@@ -292,10 +287,7 @@ def _add_fields(d, namespace, fields):
 
 def _add_vendor_presence_bit(d, oui, bit):
 
-    if isinstance(d, list):
-        tgt = d[-1]
-    else:
-        tgt = d[oui]
+    tgt = d[-1] if isinstance(d, list) else d[oui]
     tgt['present'] |= 1 << bit
 
 def radiotap_parse(packet, valuelist=False):
@@ -404,12 +396,12 @@ def ieee80211_parse(packet, offset):
         addr2, ba_ctrl, ba_ssc, ba_bitmap = \
             struct.unpack_from(blkack_fmt, packet, offset)
         offset += blkack_len
-        mac.update({
+        mac |= {
             'addr2': macstr(addr2),
             'ba_ctrl': ba_ctrl,
             'ba_ssc': ba_ssc,
-            'ba_bitmap': ba_bitmap
-        })
+            'ba_bitmap': ba_bitmap,
+        }
         return offset, mac
 
     three_addr_fmt = "<6s6sH"
@@ -420,12 +412,12 @@ def ieee80211_parse(packet, offset):
     addr2, addr3, seq = \
         struct.unpack_from(three_addr_fmt, packet, offset)
     offset += three_addr_len
-    mac.update({
+    mac |= {
         'addr2': macstr(addr2),
         'addr3': macstr(addr3),
         'seq': seq >> 4,
-        'frag': seq & 0x0f
-    })
+        'frag': seq & 0x0F,
+    }
 
     if is_qos(mac):
         four_addr_fmt = "<6s"
@@ -435,9 +427,7 @@ def ieee80211_parse(packet, offset):
 
         addr4, = struct.unpack_from(four_addr_fmt, packet, offset)
         offset += four_addr_len
-        mac.update({
-            'addr4': macstr(addr4)
-        })
+        mac['addr4'] = macstr(addr4)
 
         qos_ctrl_fmt = "<H"
         qos_ctrl_len = struct.calcsize(qos_ctrl_fmt)
@@ -450,11 +440,11 @@ def ieee80211_parse(packet, offset):
         mesh_ps = (qos_ctrl >> 9) & 1
         rspi = (qos_ctrl >> 10) & 1
 
-        mac.update({
+        mac |= {
             'tid': tid,
             'eosp': eosp,
             'rspi': rspi,
             'mesh_ps': mesh_ps,
-        })
+        }
 
     return offset, mac
